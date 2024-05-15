@@ -215,3 +215,78 @@ impl SymbolicKANLayer {
         }
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tch::{Device, Kind, Tensor};
+
+    #[test]
+    fn test_new() {
+        let in_dim = 3;
+        let out_dim = 2;
+        let device = Device::Cpu;
+        let layer = SymbolicKANLayer::new(in_dim, out_dim, device);
+
+        assert_eq!(layer.in_dim, in_dim);
+        assert_eq!(layer.out_dim, out_dim);
+        assert_eq!(layer.mask.size(), &[out_dim, in_dim]);
+        assert_eq!(layer.affine.size(), &[out_dim, in_dim, 4]);
+        assert_eq!(layer.funs_sympy.len(), out_dim);
+        assert_eq!(layer.funs_sympy[0].len(), in_dim);
+    }
+
+    #[test]
+    fn test_forward() {
+        let in_dim = 3;
+        let out_dim = 2;
+        let device = Device::Cpu;
+        let mut layer = SymbolicKANLayer::new(in_dim, out_dim, device);
+
+        layer.fix_symbolic(0, 0, "sin", 1.0, 0.0, 1.0, 0.0);
+        layer.fix_symbolic(1, 0, "cos", 1.0, 0.0, 1.0, 0.0);
+        layer.fix_symbolic(2, 0, "tanh", 1.0, 0.0, 1.0, 0.0);
+        layer.fix_symbolic(0, 1, "exp", 1.0, 0.0, 1.0, 0.0);
+        layer.fix_symbolic(1, 1, "sig", 1.0, 0.0, 1.0, 0.0);
+        layer.fix_symbolic(2, 1, "id", 1.0, 0.0, 1.0, 0.0);
+
+        let x = Tensor::of_slice(&[1.0, 2.0, 3.0]).view([-1, 3]);
+        let (x_symbolic, postacts_symbolic) = layer.forward(&x);
+
+        assert_eq!(x_symbolic.size(), &[1, 2]);
+        assert_eq!(postacts_symbolic.size(), &[1, 2]);
+    }
+
+    #[test]
+    fn test_fix_symbolic() {
+        let in_dim = 3;
+        let out_dim = 2;
+        let device = Device::Cpu;
+        let mut layer = SymbolicKANLayer::new(in_dim, out_dim, device);
+
+        layer.fix_symbolic(0, 0, "sin", 1.0, 0.0, 1.0, 0.0);
+        assert_eq!(layer.funs_sympy[0][0], "sin");
+        assert_eq!(layer.affine[0][0][0].double_value(&[]), 1.0);
+        assert_eq!(layer.affine[0][0][1].double_value(&[]), 0.0);
+        assert_eq!(layer.affine[0][0][2].double_value(&[]), 1.0);
+        assert_eq!(layer.affine[0][0][3].double_value(&[]), 0.0);
+    }
+
+    #[test]
+    fn test_get_subset() {
+        let in_dim = 3;
+        let out_dim = 2;
+        let device = Device::Cpu;
+        let layer = SymbolicKANLayer::new(in_dim, out_dim, device);
+
+        let active_in = &[0, 2];
+        let active_out = &[1];
+        let sub_layer = layer.get_subset(active_in, active_out);
+
+        assert_eq!(sub_layer.in_dim, 2);
+        assert_eq!(sub_layer.out_dim, 1);
+        assert_eq!(sub_layer.mask.size(), &[1, 2]);
+        assert_eq!(sub_layer.affine.size(), &[1, 2, 4]);
+        assert_eq!(sub_layer.funs_sympy.len(), 1);
+        assert_eq!(sub_layer.funs_sympy[0].len(), 2);
+    }
+}
