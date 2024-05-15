@@ -20,7 +20,7 @@ use tch::{nn, Tensor};
 /// * `grid` - The grid points.
 /// * `sp_trainable` - Indicates whether `scale_sp` is trainable.
 /// * `sb_trainable` - Indicates whether `scale_base` is trainable.
-struct KANLayer {
+pub struct KANLayer {
     in_dim: usize,
     out_dim: usize,
     num: usize,

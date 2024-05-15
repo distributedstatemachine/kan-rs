@@ -19,7 +19,7 @@ use tch::{nn, Device, Kind, Tensor};
 /// * `base_fun` - The residual function b(x) as an `nn::Module`.
 /// * `symbolic_enabled` - Indicates whether symbolic computation is enabled.
 /// * `device` - The device on which the model is running (e.g., CPU or GPU).
-struct KAN {
+pub struct KAN {
     biases: Vec<nn::Linear>,
     act_fun: Vec<KANLayer>,
     symbolic_fun: Vec<Symbolic_KANLayer>,
@@ -33,7 +33,7 @@ struct KAN {
 }
 
 impl KAN {
-    fn new(
+    pub fn new(
         width: &[usize],
         grid: usize,
         k: usize,
@@ -249,7 +249,7 @@ impl KAN {
         (x_min, x_max, y_min, y_max)
     }
 
-    fn auto_symbolic(&mut self, lib: &[&str]) {
+    pub fn auto_symbolic(&mut self, lib: &[&str]) {
         for l in 0..self.depth {
             for i in 0..self.width[l] {
                 for j in 0..self.width[l + 1] {
@@ -293,7 +293,7 @@ impl KAN {
         (best_name, best_name, best_r2)
     }
 
-    fn prune(&mut self, threshold: f64) -> Self {
+    pub fn prune(&mut self, threshold: f64) -> Self {
         let mut mask = vec![Tensor::ones(&[self.width[0]], (Kind::Float, self.device))];
         let mut active_neurons = vec![Vec::from_iter(0..self.width[0])];
 
@@ -431,7 +431,7 @@ fn polynomial_basis(x: &Tensor, grid: &Tensor, k: usize) -> Tensor {
     Tensor::stack(&basis, -1)
 }
 
-trait StateDict {
+pub trait StateDict {
     fn state_dict(&self) -> Vec<(&str, Tensor)>;
     fn load_state_dict(&mut self, state_dict: &[(&str, Tensor)]);
 }
