@@ -1,6 +1,6 @@
-# `kan-rs`: Kolmogorov-Arnold Networks in 🦀
+# `kan-rs`: Kolmogorov-Arnold Networks 🦀
 
-`kan-rs` is a Rust implementation of [Kolmogorov-Arnold Networks](https://arxiv.org/abs/2404.19756) (KANs), a novel neural network architecture inspired by the Kolmogorov-Arnold representation theorem. KANs offer a unique approach to function approximation by combining continuous piecewise polynomial splines with symbolic functions. Specifically . It is a port of [py-kan](https://github.com/KindXiaoming/pykan/tree/master). 
+`kan-rs` is a 🦀 implementation of [Kolmogorov-Arnold Networks](https://arxiv.org/abs/2404.19756) (KANs), a novel neural network architecture inspired by the Kolmogorov-Arnold representation theorem. KANs offer a unique approach to function approximation by combining continuous piecewise polynomial splines with symbolic functions. Specifically . It is a port of [py-kan](https://github.com/KindXiaoming/pykan/tree/master). 
 
 ## Key Innovations
 
@@ -23,13 +23,13 @@
 
 ## Educational Purpose
 
-`kan-rs` is developed for educational purposes, serving as a learning resource for those interested in understanding and implementing KANs in Rust. It provides a starting point for exploring the concepts and techniques behind KANs and encourages experimentation and further development.
+`kan-rs` is developed for educational purposes, serving as a learning resource for those interested in understanding and implementing KANs in 🦀. It provides a starting point for exploring the concepts and techniques behind KANs and encourages experimentation and further development.
 
 However, it is important to note that `kan-rs` is not production-ready (and probably never will be) and should not be used in critical or real-world applications without thorough testing, validation, and additional development efforts. The implementation may have limitations, bugs, or performance issues that need to be addressed before considering it for production use.
 
 ## Getting Started
 
-To get started with `kan-rs`, refer to the documentation and examples provided in the repository. The code is organized into modules, and the main entry point is located in the `src/main.rs` file. You can run the code using the Rust compiler and experiment with different configurations and datasets.
+To get started with `kan-rs`, refer to the documentation and examples provided in the repository. The code is organized into modules, and the main entry point is located in the `src/main.rs` file. 
 
 ## Contributing
 
