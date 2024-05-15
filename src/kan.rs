@@ -1,11 +1,11 @@
 use crate::kan_layer::KANLayer;
 use crate::symbolic_kan_layer::SymbolicKANLayer;
-use rand::prelude::*;
-use tch::{nn, Device, Kind, Tensor};
 use plotlib::page::Page;
 use plotlib::repr::Plot;
 use plotlib::style::{PointMarker, PointStyle};
 use plotlib::view::ContinuousView;
+use rand::prelude::*;
+use tch::{nn, Device, Kind, Tensor};
 
 /// Represents the Kolmogorov-Arnold Network (KAN) model.
 ///
@@ -202,6 +202,183 @@ impl KAN {
         }
     }
 
+    pub fn train(
+        &mut self,
+        dataset: &std::collections::HashMap<String, Tensor>,
+        opt: &str,
+        steps: i64,
+        log: i64,
+        lamb: f64,
+        lamb_l1: f64,
+        lamb_entropy: f64,
+        lamb_coef: f64,
+        lamb_coefdiff: f64,
+        update_grid: bool,
+        grid_update_num: i64,
+        loss_fn: Option<&dyn Fn(&Tensor, &Tensor) -> Tensor>,
+        lr: f64,
+        stop_grid_update_step: i64,
+        batch: i64,
+        small_mag_threshold: f64,
+        small_reg_factor: f64,
+        metrics: &[&dyn Fn() -> f64],
+        sglr_avoid: bool,
+        save_fig: bool,
+        in_vars: &[String],
+        out_vars: &[String],
+        beta: f64,
+        save_fig_freq: i64,
+        img_folder: &str,
+        device: Device,
+    ) -> std::collections::HashMap<String, Vec<f64>> {
+        let mut results = std::collections::HashMap::new();
+        results.insert("train_loss".to_string(), Vec::new());
+        results.insert("test_loss".to_string(), Vec::new());
+        results.insert("reg".to_string(), Vec::new());
+        for metric in metrics {
+            results.insert(
+                std::any::type_name::<dyn Fn() -> f64>().to_string(),
+                Vec::new(),
+            );
+        }
+
+        let loss_fn = loss_fn
+            .unwrap_or_else(|| &|x: &Tensor, y: &Tensor| (x - y).pow(2).mean(tch::Kind::Float));
+        let loss_fn_eval = loss_fn;
+
+        let grid_update_freq = stop_grid_update_step / grid_update_num;
+
+        let optimizer = if opt == "Adam" {
+            nn::Adam::default().build(&self.parameters(), lr).unwrap()
+        } else {
+            nn::Optimizer::lbfgs(&self.parameters(), lr, Default::default())
+        };
+
+        let batch_size = if batch == -1 || batch > dataset["train_input"].size()[0] {
+            dataset["train_input"].size()[0]
+        } else {
+            batch
+        };
+        let batch_size_test = if batch == -1 || batch > dataset["test_input"].size()[0] {
+            dataset["test_input"].size()[0]
+        } else {
+            batch
+        };
+
+        let closure = || {
+            optimizer.zero_grad();
+            let train_id = Tensor::randint(
+                dataset["train_input"].size()[0],
+                &[batch_size],
+                tch::Kind::Int64,
+            )
+            .to_device(device);
+            let pred = self.forward(&dataset["train_input"].index_select(0, &train_id));
+            let train_loss = if sglr_avoid {
+                let id = tch::no_grad(|| {
+                    pred.sum_dim_intlist(&[-1], false, tch::Kind::Float)
+                        .isnan()
+                        .logical_not()
+                });
+                loss_fn(
+                    &pred.index_select(0, &id),
+                    &dataset["train_label"]
+                        .index_select(0, &train_id)
+                        .index_select(0, &id),
+                )
+            } else {
+                loss_fn(&pred, &dataset["train_label"].index_select(0, &train_id))
+            };
+            let reg = self.regularization(
+                &self.acts_scale,
+                lamb_l1,
+                lamb_entropy,
+                lamb_coef,
+                lamb_coefdiff,
+                small_mag_threshold,
+                small_reg_factor,
+            );
+            let objective = train_loss + lamb * reg;
+            objective.backward();
+            train_loss
+        };
+
+        for step in 0..steps {
+            if step % grid_update_freq == 0 && step < stop_grid_update_step && update_grid {
+                self.update_grid_from_samples(&dataset["train_input"].to_device(device));
+            }
+
+            let train_loss = if opt == "LBFGS" {
+                optimizer.step(closure).unwrap()
+            } else {
+                closure();
+                optimizer.step();
+                closure()
+            };
+
+            let test_id = Tensor::randint(
+                dataset["test_input"].size()[0],
+                &[batch_size_test],
+                tch::Kind::Int64,
+            )
+            .to_device(device);
+            let test_loss = loss_fn_eval(
+                &self.forward(&dataset["test_input"].index_select(0, &test_id)),
+                &dataset["test_label"].index_select(0, &test_id),
+            );
+
+            if step % log == 0 {
+                println!(
+                    "Step: {}, Train Loss: {:.4}, Test Loss: {:.4}",
+                    step,
+                    train_loss.double_value(&[]),
+                    test_loss.double_value(&[])
+                );
+            }
+
+            results
+                .get_mut("train_loss")
+                .unwrap()
+                .push(train_loss.sqrt().double_value(&[]) as f64);
+            results
+                .get_mut("test_loss")
+                .unwrap()
+                .push(test_loss.sqrt().double_value(&[]) as f64);
+            results.get_mut("reg").unwrap().push(
+                lamb * self
+                    .regularization(
+                        &self.acts_scale,
+                        lamb_l1,
+                        lamb_entropy,
+                        lamb_coef,
+                        lamb_coefdiff,
+                        small_mag_threshold,
+                        small_reg_factor,
+                    )
+                    .double_value(&[]) as f64,
+            );
+
+            for metric in metrics {
+                results
+                    .get_mut(&format!(
+                        "metric_{}",
+                        metrics
+                            .iter()
+                            .position(|&m| std::ptr::eq(m, metric))
+                            .unwrap()
+                    ))
+                    .unwrap()
+                    .push(metric());
+            }
+
+            if save_fig && step % save_fig_freq == 0 {
+                self.plot(img_folder, beta);
+            }
+        }
+
+        results
+    }
+
     pub fn fix_symbolic(
         &mut self,
         l: usize,
@@ -253,7 +430,13 @@ impl KAN {
         (x_min, x_max, y_min, y_max)
     }
 
-    pub fn auto_symbolic(&mut self, input_range: (f64, f64), output_range: (f64, f64), lib: &[&str], num_samples: usize) {
+    pub fn auto_symbolic(
+        &mut self,
+        input_range: (f64, f64),
+        output_range: (f64, f64),
+        lib: &[&str],
+        num_samples: usize,
+    ) {
         for l in 0..self.depth {
             for i in 0..self.width[l] {
                 for j in 0..self.width[l + 1] {
@@ -413,7 +596,10 @@ impl KAN {
         let mut points = Vec::new();
         for (i, pos) in layer_pos.iter().enumerate() {
             let l = (0..num_layers)
-                .find(|&l| self.width[0..l].iter().sum::<usize>() <= i && i < self.width[0..=l].iter().sum::<usize>())
+                .find(|&l| {
+                    self.width[0..l].iter().sum::<usize>() <= i
+                        && i < self.width[0..=l].iter().sum::<usize>()
+                })
                 .unwrap();
             let color = if l == 0 || l == num_layers - 1 {
                 "black"
@@ -437,31 +623,40 @@ impl KAN {
         page.render();
     }
 
-    pub fn create_dataset(f: &dyn Fn(&Tensor) -> Tensor, n_var: i64) -> std::collections::HashMap<String, Tensor> {
+    pub fn create_dataset(
+        f: &dyn Fn(&Tensor) -> Tensor,
+        n_var: i64,
+    ) -> std::collections::HashMap<String, Tensor> {
         let train_size = 1000;
         let test_size = 200;
         let bound = 5.0;
-    
+
         let mut rng = rand::thread_rng();
         let dist = Uniform::new(-bound, bound);
-    
+
         let train_input = Tensor::of_slice(
-            &(0..train_size * n_var).map(|_| dist.sample(&mut rng) as f64).collect::<Vec<f64>>()
-        ).reshape(&[train_size, n_var]);
-    
+            &(0..train_size * n_var)
+                .map(|_| dist.sample(&mut rng) as f64)
+                .collect::<Vec<f64>>(),
+        )
+        .reshape(&[train_size, n_var]);
+
         let test_input = Tensor::of_slice(
-            &(0..test_size * n_var).map(|_| dist.sample(&mut rng) as f64).collect::<Vec<f64>>()
-        ).reshape(&[test_size, n_var]);
-    
+            &(0..test_size * n_var)
+                .map(|_| dist.sample(&mut rng) as f64)
+                .collect::<Vec<f64>>(),
+        )
+        .reshape(&[test_size, n_var]);
+
         let train_label = f(&train_input);
         let test_label = f(&test_input);
-    
+
         let mut dataset = std::collections::HashMap::new();
         dataset.insert("train_input".to_string(), train_input);
         dataset.insert("train_label".to_string(), train_label);
         dataset.insert("test_input".to_string(), test_input);
         dataset.insert("test_label".to_string(), test_label);
-    
+
         dataset
     }
 
@@ -477,7 +672,11 @@ impl KAN {
                     let mut plot = Plot::new();
 
                     let symbol_mask = self.symbolic_fun[l].mask.i((j, i));
-                    let numerical_mask = self.act_fun[l].mask.slice(0, j * self.width[l] + i, j * self.width[l] + i + 1);
+                    let numerical_mask = self.act_fun[l].mask.slice(
+                        0,
+                        j * self.width[l] + i,
+                        j * self.width[l] + i + 1,
+                    );
                     let (color, alpha_mask) = if symbol_mask > 0.0 && numerical_mask > 0.0 {
                         ("purple", 1.0)
                     } else if symbol_mask > 0.0 && numerical_mask == 0.0 {
@@ -488,17 +687,23 @@ impl KAN {
                         ("white", 0.0)
                     };
 
-                    let x: Vec<f64> = rank.iter().map(|&x| x as f64 / rank.size()[0] as f64).collect();
+                    let x: Vec<f64> = rank
+                        .iter()
+                        .map(|&x| x as f64 / rank.size()[0] as f64)
+                        .collect();
                     let y: Vec<f64> = self.acts[l].slice(0, i, i + 1).iter().map(|&y| y).collect();
 
-                    plot.add_trace(Scatter::new(x, y).mode(plotpy::Mode::Lines).line(plotpy::Line::new().color(color).width(3.0)));
+                    plot.add_trace(
+                        Scatter::new(x, y)
+                            .mode(plotpy::Mode::Lines)
+                            .line(plotpy::Line::new().color(color).width(3.0)),
+                    );
 
                     plot.write_html(format!("{}/sp_{}_{}_{}html", folder, l, i, j));
                 }
             }
         }
     }
-
 }
 
 fn curve2coef(
