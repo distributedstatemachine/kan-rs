@@ -26,7 +26,7 @@ use tch::{nn, Device, Kind, Tensor};
 pub struct KAN {
     biases: Vec<nn::Linear>,
     act_fun: Vec<KANLayer>,
-    symbolic_fun: Vec<Symbolic_KANLayer>,
+    symbolic_fun: Vec<SymbolicKANLayer>,
     depth: usize,
     width: Vec<usize>,
     grid: usize,
@@ -74,7 +74,7 @@ impl KAN {
             };
             act_fun.push(kan_layer);
 
-            let symbolic_layer = Symbolic_KANLayer::new(width[l], width[l + 1], device);
+            let symbolic_layer = SymbolicKANLayer::new(width[l], width[l + 1], device);
             symbolic_fun.push(symbolic_layer);
         }
 
@@ -793,11 +793,11 @@ impl StateDict for KAN {
         for (i, symbolic_fun) in self.symbolic_fun.iter().enumerate() {
             state_dict.push((
                 format!("symbolic_fun.{}.mask", i).as_str(),
-                symbolic_fun.mask.clone(),
+                symbolic_fun.mask.copy(),
             ));
             state_dict.push((
                 format!("symbolic_fun.{}.affine", i).as_str(),
-                symbolic_fun.affine.clone(),
+                symbolic_fun.affine.copy(),
             ));
         }
 

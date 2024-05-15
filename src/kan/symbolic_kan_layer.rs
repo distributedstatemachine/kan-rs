@@ -1,3 +1,5 @@
+use tch::{nn, Device, Kind, Tensor};
+
 /// Represents a symbolic layer in the Kolmogorov-Arnold Network (KAN).
 ///
 /// The `SymbolicKANLayer` struct contains the necessary parameters and configurations
@@ -11,15 +13,15 @@
 /// * `affine` - The affine transformation matrix.
 /// * `funs_sympy` - The symbolic representation of the activation functions using SymPy.
 pub struct SymbolicKANLayer {
-    in_dim: usize,
-    out_dim: usize,
-    mask: Tensor,
-    affine: Tensor,
-    funs_sympy: Vec<Vec<String>>,
+    pub in_dim: usize,
+    pub out_dim: usize,
+    pub mask: Tensor,
+    pub affine: Tensor,
+    pub funs_sympy: Vec<Vec<String>>,
 }
 
 impl SymbolicKANLayer {
-    fn new(in_dim: usize, out_dim: usize, device: Device) -> Self {
+    pub fn new(in_dim: usize, out_dim: usize, device: Device) -> Self {
         let mask = Tensor::ones(&[out_dim, in_dim], (Kind::Float, device));
         let affine = Tensor::zeros(&[out_dim, in_dim, 4], (Kind::Float, device));
         let funs_sympy = vec![vec!["".to_string(); in_dim]; out_dim];
@@ -33,7 +35,7 @@ impl SymbolicKANLayer {
         }
     }
 
-    fn forward(&self, x: &Tensor) -> (Tensor, Tensor) {
+    pub fn forward(&self, x: &Tensor) -> (Tensor, Tensor) {
         let mut x_symbolic = Tensor::zeros(&[x.size()[0], self.out_dim], (Kind::Float, x.device()));
         let mut postacts_symbolic =
             Tensor::zeros(&[x.size()[0], self.out_dim], (Kind::Float, x.device()));
@@ -48,17 +50,17 @@ impl SymbolicKANLayer {
                     let fun_name = &self.funs_sympy[j][i];
 
                     let result = match fun_name.as_str() {
-                        "sin" => (a * x.index(&[.., i]) + b).sin() * c + d,
-                        "cos" => (a * x.index(&[.., i]) + b).cos() * c + d,
-                        "tanh" => (a * x.index(&[.., i]) + b).tanh() * c + d,
-                        "exp" => (a * x.index(&[.., i]) + b).exp() * c + d,
-                        "sig" => (a * x.index(&[.., i]) + b).sigmoid() * c + d,
-                        "log" => (a * x.index(&[.., i]) + b + 1e-4).log() * c + d,
-                        "sqrt" => (a * x.index(&[.., i]) + b + 1e-4).sqrt() * c + d,
-                        "cosh" => (a * x.index(&[.., i]) + b).cosh() * c + d,
-                        "sinh" => (a * x.index(&[.., i]) + b).sinh() * c + d,
-                        "id" => a * x.index(&[.., i]) + b,
-                        _ => Tensor::zeros_like(&x.index(&[.., i])),
+                        "sin" => (a * x.index((.., i)) + b).sin() * c + d,
+                        "cos" => (a * x.index((.., i)) + b).cos() * c + d,
+                        "tanh" => (a * x.index((.., i)) + b).tanh() * c + d,
+                        "exp" => (a * x.index((.., i)) + b).exp() * c + d,
+                        "sig" => (a * x.index((.., i)) + b).sigmoid() * c + d,
+                        "log" => (a * x.index((.., i)) + b + 1e-4).log() * c + d,
+                        "sqrt" => (a * x.index((.., i)) + b + 1e-4).sqrt() * c + d,
+                        "cosh" => (a * x.index((.., i)) + b).cosh() * c + d,
+                        "sinh" => (a * x.index((.., i)) + b).sinh() * c + d,
+                        "id" => a * x.index((.., i)) + b,
+                        _ => Tensor::zeros_like(&x.index((.., i))),
                     };
 
                     x_symbolic.index_mut(&[.., j]).add_(&result);
@@ -70,7 +72,7 @@ impl SymbolicKANLayer {
         (x_symbolic, postacts_symbolic)
     }
 
-    fn fix_symbolic(&mut self, i: usize, j: usize, fun_name: &str, a: f64, b: f64, c: f64, d: f64) {
+    pub fn fix_symbolic(&mut self, i: usize, j: usize, fun_name: &str, a: f64, b: f64, c: f64, d: f64) {
         if fun_name == "sin"
             || fun_name == "cos"
             || fun_name == "tanh"
@@ -92,7 +94,7 @@ impl SymbolicKANLayer {
         }
     }
 
-    fn fix_symbolic_from_data(
+    pub fn fix_symbolic_from_data(
         &mut self,
         i: usize,
         j: usize,
@@ -133,11 +135,8 @@ impl SymbolicKANLayer {
             _ => panic!("Invalid function name: {}", fun_name),
         };
 
-        let sse = (y - y_pred).pow(2).sum().double_value(&[]);
-        let sst = (y - y.mean(&[0], false, Kind::Float))
-            .pow(2)
-            .sum()
-            .double_value(&[]);
+        let sse = (y - y_pred).pow(2).sum_dim(&[0], false).double_value(&[]);
+    let sst = (y - y.mean(Kind::Float)).pow(2).sum_dim(&[0], false).double_value(&[]);
 
         1.0 - sse / sst
     }
@@ -189,11 +188,14 @@ impl SymbolicKANLayer {
         let b = y_mean - a * x_mean;
         (a, b)
     }
-    fn get_subset(&self, active_in: &[usize], active_out: &[usize]) -> Self {
+
+    pub fn get_subset(&self, active_in: &[usize], active_out: &[usize]) -> Self {
         let sub_in_dim = active_in.len();
         let sub_out_dim = active_out.len();
-        let sub_mask = self.mask.index(&[active_out, active_in]);
-        let sub_affine = self.affine.index(&[active_out, active_in, ..]);
+        let active_out_tensor = Tensor::of_slice(active_out).to_device(self.mask.device());
+        let active_in_tensor = Tensor::of_slice(active_in).to_device(self.mask.device());
+        let sub_mask = self.mask.index_select(0, &active_out_tensor).index_select(1, &active_in_tensor);
+        let sub_affine = self.affine.index_select(0, &active_out_tensor).index_select(1, &active_in_tensor);
         let sub_funs_sympy = active_out
             .iter()
             .map(|&j| {
@@ -203,7 +205,7 @@ impl SymbolicKANLayer {
                     .collect()
             })
             .collect();
-
+    
         SymbolicKANLayer {
             in_dim: sub_in_dim,
             out_dim: sub_out_dim,

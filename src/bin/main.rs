@@ -2,7 +2,6 @@ use plotters::prelude::*;
 use rand::prelude::*;
 use tch::{nn, Device, Tensor};
 
-// pub mod kan;
 use kan::{create_dataset, KAN};
 
 fn main() {
