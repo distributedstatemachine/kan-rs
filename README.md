@@ -1,4 +1,4 @@
-# `kan-rs`: Kolmogorov-Arnold Representation Networks in Rust
+# `kan-rs`: Kolmogorov-Arnold Representation Networks in 🦀
 
 `kan-rs` is a Rust implementation of [Kolmogorov-Arnold Networks](https://arxiv.org/abs/2404.19756) (KANs), a novel neural network architecture inspired by the Kolmogorov-Arnold representation theorem. KANs offer a unique approach to function approximation by combining continuous piecewise polynomial splines with symbolic functions. Specifically . It is a port of [py-kan](https://github.com/KindXiaoming/pykan/tree/master). 
 
