@@ -1,5 +1,5 @@
-use crate::kan_layer::KANLayer;
-use crate::symbolic_kan_layer::SymbolicKANLayer;
+use crate::kan::kan_layer::KANLayer;
+use crate::kan::symbolic_kan_layer::SymbolicKANLayer;
 use plotlib::page::Page;
 use plotlib::repr::Plot;
 use plotlib::style::{PointMarker, PointStyle};
@@ -672,11 +672,9 @@ impl KAN {
                     let mut plot = Plot::new();
 
                     let symbol_mask = self.symbolic_fun[l].mask.i((j, i));
-                    let numerical_mask = self.act_fun[l].mask.slice(
-                        0,
-                        j * self.width[l] + i,
-                        j * self.width[l] + i + 1,
-                    );
+                    let numerical_mask = self.act_fun[l]
+                        .mask
+                        .index(&Tensor::of_slice(&[j * self.width[l] + i]));
                     let (color, alpha_mask) = if symbol_mask > 0.0 && numerical_mask > 0.0 {
                         ("purple", 1.0)
                     } else if symbol_mask > 0.0 && numerical_mask == 0.0 {
@@ -782,14 +780,14 @@ impl StateDict for KAN {
         for (i, act_fun) in self.act_fun.iter().enumerate() {
             state_dict.push((
                 format!("act_fun.{}.scale_base", i).as_str(),
-                act_fun.scale_base.clone(),
+                act_fun.scale_base.copy(),
             ));
             state_dict.push((
                 format!("act_fun.{}.scale_sp", i).as_str(),
-                act_fun.scale_sp.clone(),
+                act_fun.scale_sp.copy(),
             ));
-            state_dict.push((format!("act_fun.{}.coef", i).as_str(), act_fun.coef.clone()));
-            state_dict.push((format!("act_fun.{}.mask", i).as_str(), act_fun.mask.clone()));
+            state_dict.push((format!("act_fun.{}.coef", i).as_str(), act_fun.coef.copy()));
+            state_dict.push((format!("act_fun.{}.mask", i).as_str(), act_fun.mask.copy()));
         }
 
         for (i, symbolic_fun) in self.symbolic_fun.iter().enumerate() {

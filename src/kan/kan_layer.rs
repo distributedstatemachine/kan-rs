@@ -21,18 +21,18 @@ use tch::{nn, Tensor};
 /// * `sp_trainable` - Indicates whether `scale_sp` is trainable.
 /// * `sb_trainable` - Indicates whether `scale_base` is trainable.
 pub struct KANLayer {
-    in_dim: usize,
-    out_dim: usize,
-    num: usize,
-    k: usize,
-    scale_base: Tensor,
-    scale_sp: Tensor,
-    base_fun: nn::Module,
-    coef: Tensor,
-    mask: Tensor,
-    grid: Tensor,
-    sp_trainable: bool,
-    sb_trainable: bool,
+    pub in_dim: usize,
+    pub out_dim: usize,
+    pub num: usize,
+    pub k: usize,
+    pub scale_base: Tensor,
+    pub scale_sp: Tensor,
+    pub base_fun: nn::Module,
+    pub coef: Tensor,
+    pub mask: Tensor,
+    pub grid: Tensor,
+    pub sp_trainable: bool,
+    pub sb_trainable: bool,
 }
 
 impl KANLayer {
@@ -66,7 +66,7 @@ impl KANLayer {
         }
     }
 
-    fn forward(&self, x: &Tensor) -> (Tensor, Tensor, Tensor, Tensor) {
+    pub fn forward(&self, x: &Tensor) -> (Tensor, Tensor, Tensor, Tensor) {
         let batch_size = x.size()[0];
         let x_expand = x
             .view([batch_size, self.in_dim, 1])
@@ -112,7 +112,7 @@ impl KANLayer {
         self.grid = Tensor::linspace(min, max, self.num + 1, (Kind::Float, Device::Cpu));
     }
 
-    fn get_subset(&self, active_in: &[usize], active_out: &[usize]) -> Self {
+    pub fn get_subset(&self, active_in: &[usize], active_out: &[usize]) -> Self {
         let sub_in_dim = active_in.len();
         let sub_out_dim = active_out.len();
         let sub_scale_base = self
@@ -182,7 +182,7 @@ impl KANLayer {
         self.coef.copy_(&coef_new);
     }
 
-    fn lock(&mut self, ids: &[(usize, usize)]) {
+    pub fn lock(&mut self, ids: &[(usize, usize)]) {
         let mut unique_ids = ids.to_vec();
         unique_ids.sort_unstable();
         unique_ids.dedup();
@@ -218,7 +218,7 @@ impl KANLayer {
         self.mask.copy_(&pruned_mask.view([-1]));
     }
 
-    fn initialize_grid_from_parent(&mut self, parent: &KANLayer, activations: &Tensor) {
+    pub fn initialize_grid_from_parent(&mut self, parent: &KANLayer, activations: &Tensor) {
         let min_val = activations.min().unwrap();
         let max_val = activations.max().unwrap();
         let mut new_grid =
@@ -232,7 +232,7 @@ impl KANLayer {
         self.grid.copy_(&new_grid.to_device(self.grid.device()));
     }
 
-    fn update_grid_from_samples(&mut self, samples: &Tensor) {
+    pub fn update_grid_from_samples(&mut self, samples: &Tensor) {
         let bounds = samples.slice(
             0,
             0,
