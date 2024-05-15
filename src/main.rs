@@ -1,111 +1,56 @@
-use tch::{Tensor, Device};
 use rand::prelude::*;
-use std::fs::File;
-use std::io::prelude::*;
+use tch::{nn, Tensor, Device};
+use plotters::prelude::*;
 
 mod kan;
-use kan::{KAN, StateDict};
+use kan::{KAN, create_dataset};
 
 fn main() {
     let device = Device::cuda_if_available();
+    let model = KAN::new(&[2, 5, 1], 5, 3, nn::activation::Tanh, true, device);
 
-    // Define the model architecture
-    let width = vec![2, 5, 1];
-    let grid = 5;
-    let k = 3;
-    let base_fun = nn::seq(&[
-        nn::linear(2, 10, Default::default()),
-        nn::relu(),
-        nn::linear(10, 1, Default::default()),
-    ]);
-    let symbolic_enabled = true;
+    let f = |x: &Tensor| x.slice(0, 0, 1, 1).sin() * std::f64::consts::PI + x.slice(0, 1, 2, 1).pow(2);
+    let dataset = create_dataset(&f, 2);
 
-    // Create a new KAN model
-    let mut model = KAN::new(&width, grid, k, base_fun, symbolic_enabled, device);
+    // Plot the KAN at initialization
+    model.forward(&dataset["train_input"]);
+    model.plot("figures", 100);
 
-    // Prepare the dataset
-    let (train_input, train_label) = prepare_train_data();
-    let (test_input, test_label) = prepare_test_data();
+    // Train the KAN with sparsity regularization
+    model.train(&dataset, "LBFGS", 20, 1, 0.01, 10.0, 0.0, 0.0, true, 10, None, 1.0, 50, -1, 1e-16, 1.0, &[], false, false, &vec![], &vec![], 3, 1, "video", device);
 
-    // Define the training parameters
-    let epochs = 100;
-    let learning_rate = 0.01;
-    let optimizer = nn::Adam::default().build(&model.parameters(), learning_rate).unwrap();
+    // Plot the trained KAN
+    model.plot("figures", 100);
 
-    // Train the model
-    for epoch in 1..=epochs {
-        let loss = model.train(&train_input, &train_label, &optimizer);
-        println!("Epoch: {}, Loss: {}", epoch, loss);
+    // Prune the KAN and replot (keep the original shape)
+    model.prune(0.01);
+    model.plot("figures", 100);
 
-        // Evaluate the model on the test set
-        let test_loss = model.evaluate(&test_input, &test_label);
-        println!("Test Loss: {}", test_loss);
+    // Prune the KAN and replot (get a smaller shape)
+    let model = model.prune(0.01);
+    model.forward(&dataset["train_input"]);
+    model.plot("figures", 100);
+
+    // Continue training and replot
+    model.train(&dataset, "LBFGS", 50, 1, 0.0, 0.0, 0.0, 0.0, true, 10, None, 1.0, 50, -1, 1e-16, 1.0, &[], false, false, &vec![], &vec![], 3, 1, "video", device);
+    model.plot("figures", 100);
+
+    // Automatically or manually set activation functions to be symbolic
+    let mode = "auto"; // or "manual"
+
+    if mode == "manual" {
+        model.fix_symbolic(0, 0, 0, "sin", true);
+        model.fix_symbolic(0, 1, 0, "x^2", true);
+        model.fix_symbolic(1, 0, 0, "exp", true);
+    } else if mode == "auto" {
+        let lib = vec!["x", "x^2", "x^3", "x^4", "exp", "log", "sqrt", "tanh", "sin", "abs"];
+        model.auto_symbolic((-10.0, 10.0), (-10.0, 10.0), &lib, 1);
     }
 
-    // Prune the model
-    let pruned_model = model.prune(0.01);
+    // Continue training to almost machine precision
+    model.train(&dataset, "LBFGS", 50, 1, 0.0, 0.0, 0.0, 0.0, false, 0, None, 1.0, 50, -1, 1e-16, 1.0, &[], false, false, &vec![], &vec![], 3, 1, "video", device);
 
-    // Perform symbolic fitting
-    let symbolic_lib = vec!["sin", "cos", "exp"];
-    pruned_model.auto_symbolic(&symbolic_lib);
-
-    // Visualize the model
-    pruned_model.visualize();
-
-    // Save the model checkpoint
-    let state_dict = pruned_model.state_dict();
-    save_checkpoint(&state_dict, "kan_model.pt");
-}
-
-fn prepare_train_data() -> (Tensor, Tensor) {
-    // Load train input data from file
-    let train_input_file = File::open("train_input.txt").expect("Failed to open train input file");
-    let train_input_reader = std::io::BufReader::new(train_input_file);
-    let train_input_data: Vec<f64> = train_input_reader
-        .lines()
-        .map(|line| line.expect("Failed to read line").parse().expect("Failed to parse number"))
-        .collect();
-    let train_input = Tensor::of_slice(&train_input_data).view([-1, 2]);
-
-    // Load train label data from file
-    let train_label_file = File::open("train_label.txt").expect("Failed to open train label file");
-    let train_label_reader = std::io::BufReader::new(train_label_file);
-    let train_label_data: Vec<f64> = train_label_reader
-        .lines()
-        .map(|line| line.expect("Failed to read line").parse().expect("Failed to parse number"))
-        .collect();
-    let train_label = Tensor::of_slice(&train_label_data).view([-1, 1]);
-
-    (train_input, train_label)
-}
-
-fn prepare_test_data() -> (Tensor, Tensor) {
-    // Load test input data from file
-    let test_input_file = File::open("test_input.txt").expect("Failed to open test input file");
-    let test_input_reader = std::io::BufReader::new(test_input_file);
-    let test_input_data: Vec<f64> = test_input_reader
-        .lines()
-        .map(|line| line.expect("Failed to read line").parse().expect("Failed to parse number"))
-        .collect();
-    let test_input = Tensor::of_slice(&test_input_data).view([-1, 2]);
-
-    // Load test label data from file
-    let test_label_file = File::open("test_label.txt").expect("Failed to open test label file");
-    let test_label_reader = std::io::BufReader::new(test_label_file);
-    let test_label_data: Vec<f64> = test_label_reader
-        .lines()
-        .map(|line| line.expect("Failed to read line").parse().expect("Failed to parse number"))
-        .collect();
-    let test_label = Tensor::of_slice(&test_label_data).view([-1, 1]);
-
-    (test_input, test_label)
-}
-
-fn save_checkpoint(state_dict: &[(&str, Tensor)], path: &str) {
-    let mut file = File::create(path).expect("Failed to create checkpoint file");
-    for (name, tensor) in state_dict {
-        let data = tensor.data();
-        file.write_all(format!("{}:{:?}\n", name, data).as_bytes())
-            .expect("Failed to write to checkpoint file");
-    }
+    // Obtain the symbolic formula
+    let (formula, vars) = model.symbolic_formula(2, &vec!["x_1".to_string(), "x_2".to_string()], None, false, None);
+    println!("Symbolic formula: {:?}", formula);
 }

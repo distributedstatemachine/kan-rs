@@ -2,6 +2,10 @@ use crate::kan_layer::KANLayer;
 use crate::symbolic_kan_layer::SymbolicKANLayer;
 use rand::prelude::*;
 use tch::{nn, Device, Kind, Tensor};
+use plotlib::page::Page;
+use plotlib::repr::Plot;
+use plotlib::style::{PointMarker, PointStyle};
+use plotlib::view::ContinuousView;
 
 /// Represents the Kolmogorov-Arnold Network (KAN) model.
 ///
@@ -88,7 +92,7 @@ impl KAN {
         }
     }
 
-    fn forward(&self, x: &Tensor) -> Tensor {
+    pub fn forward(&self, x: &Tensor) -> Tensor {
         let mut acts = vec![x.shallow_clone()];
         let mut spline_preacts = Vec::with_capacity(self.depth);
         let mut spline_postacts = Vec::with_capacity(self.depth);
@@ -198,7 +202,7 @@ impl KAN {
         }
     }
 
-    fn fix_symbolic(
+    pub fn fix_symbolic(
         &mut self,
         l: usize,
         i: usize,
@@ -249,7 +253,7 @@ impl KAN {
         (x_min, x_max, y_min, y_max)
     }
 
-    pub fn auto_symbolic(&mut self, lib: &[&str]) {
+    pub fn auto_symbolic(&mut self, input_range: (f64, f64), output_range: (f64, f64), lib: &[&str], num_samples: usize) {
         for l in 0..self.depth {
             for i in 0..self.width[l] {
                 for j in 0..self.width[l + 1] {
@@ -369,6 +373,132 @@ impl KAN {
         self.symbolic_fun[l - 1].mask.index_mut(&[i, ..]).fill_(0.0);
         self.symbolic_fun[l].mask.index_mut(&[.., i]).fill_(0.0);
     }
+
+    pub fn visualize(&self, path: &str) {
+        let mut views = Vec::new();
+
+        let mut layer_pos = Vec::new();
+        let num_layers = self.depth + 1;
+        for l in 0..num_layers {
+            let y = (l as f64) / ((num_layers - 1) as f64);
+            for i in 0..self.width[l] {
+                let x = (i as f64 + 0.5) / (self.width[l] as f64);
+                layer_pos.push((x, y));
+            }
+        }
+
+        let mut lines = Vec::new();
+        for l in 0..self.depth {
+            for i in 0..self.width[l] {
+                for j in 0..self.width[l + 1] {
+                    let x1 = layer_pos[self.width[0..l].iter().sum::<usize>() + i].0;
+                    let y1 = layer_pos[self.width[0..l].iter().sum::<usize>() + i].1;
+                    let x2 = layer_pos[self.width[0..=l].iter().sum::<usize>() + j].0;
+                    let y2 = layer_pos[self.width[0..=l].iter().sum::<usize>() + j].1;
+
+                    let mask_value = self.act_fun[l].mask[j * self.width[l] + i].double_value(&[]);
+                    if mask_value > 0.0 {
+                        let color = if self.symbolic_fun[l].mask[j][i].double_value(&[]) > 0.0 {
+                            "red"
+                        } else {
+                            "blue"
+                        };
+                        lines.push(plotlib::repr::Line::new(vec![(x1, y1), (x2, y2)], color));
+                    }
+                }
+            }
+        }
+        views.push(Plot::new(lines).point_style(PointStyle::new().colour("black")));
+
+        let mut points = Vec::new();
+        for (i, pos) in layer_pos.iter().enumerate() {
+            let l = (0..num_layers)
+                .find(|&l| self.width[0..l].iter().sum::<usize>() <= i && i < self.width[0..=l].iter().sum::<usize>())
+                .unwrap();
+            let color = if l == 0 || l == num_layers - 1 {
+                "black"
+            } else {
+                "blue"
+            };
+            points.push(plotlib::repr::Point {
+                x: pos.0,
+                y: pos.1,
+                style: PointStyle::new().colour(color).marker(PointMarker::Circle),
+            });
+        }
+        views.push(Plot::new(points));
+
+        let mut page = Page::new(path);
+        page.add(ContinuousView {
+            x_range: (0.0, 1.0),
+            y_range: (0.0, 1.0),
+            views: views,
+        });
+        page.render();
+    }
+
+    pub fn create_dataset(f: &dyn Fn(&Tensor) -> Tensor, n_var: i64) -> std::collections::HashMap<String, Tensor> {
+        let train_size = 1000;
+        let test_size = 200;
+        let bound = 5.0;
+    
+        let mut rng = rand::thread_rng();
+        let dist = Uniform::new(-bound, bound);
+    
+        let train_input = Tensor::of_slice(
+            &(0..train_size * n_var).map(|_| dist.sample(&mut rng) as f64).collect::<Vec<f64>>()
+        ).reshape(&[train_size, n_var]);
+    
+        let test_input = Tensor::of_slice(
+            &(0..test_size * n_var).map(|_| dist.sample(&mut rng) as f64).collect::<Vec<f64>>()
+        ).reshape(&[test_size, n_var]);
+    
+        let train_label = f(&train_input);
+        let test_label = f(&test_input);
+    
+        let mut dataset = std::collections::HashMap::new();
+        dataset.insert("train_input".to_string(), train_input);
+        dataset.insert("train_label".to_string(), train_label);
+        dataset.insert("test_input".to_string(), test_input);
+        dataset.insert("test_label".to_string(), test_label);
+    
+        dataset
+    }
+
+    pub fn plot(&self, folder: &str, beta: f64) {
+        // Create the output folder if it doesn't exist
+        std::fs::create_dir_all(folder).expect("Failed to create output folder");
+
+        let depth = self.depth;
+        for l in 0..depth {
+            for i in 0..self.width[l] {
+                for j in 0..self.width[l + 1] {
+                    let rank = self.acts[l].slice(0, i, i + 1).argsort(0, true);
+                    let mut plot = Plot::new();
+
+                    let symbol_mask = self.symbolic_fun[l].mask.i((j, i));
+                    let numerical_mask = self.act_fun[l].mask.slice(0, j * self.width[l] + i, j * self.width[l] + i + 1);
+                    let (color, alpha_mask) = if symbol_mask > 0.0 && numerical_mask > 0.0 {
+                        ("purple", 1.0)
+                    } else if symbol_mask > 0.0 && numerical_mask == 0.0 {
+                        ("red", 1.0)
+                    } else if symbol_mask == 0.0 && numerical_mask > 0.0 {
+                        ("black", 1.0)
+                    } else {
+                        ("white", 0.0)
+                    };
+
+                    let x: Vec<f64> = rank.iter().map(|&x| x as f64 / rank.size()[0] as f64).collect();
+                    let y: Vec<f64> = self.acts[l].slice(0, i, i + 1).iter().map(|&y| y).collect();
+
+                    plot.add_trace(Scatter::new(x, y).mode(plotpy::Mode::Lines).line(plotpy::Line::new().color(color).width(3.0)));
+
+                    plot.write_html(format!("{}/sp_{}_{}_{}html", folder, l, i, j));
+                }
+            }
+        }
+    }
+
 }
 
 fn curve2coef(
